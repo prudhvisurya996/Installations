@@ -43,4 +43,6 @@ sudo systemctl restart nexus
 Open PublicIP:8081 to access Nexus
 
 
+cat /opt/sonatype-work/nexus3/admin.password
+
  
