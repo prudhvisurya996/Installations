@@ -1,75 +1,73 @@
 #!/bin/bash
 
+# Nexus install script for Ubuntu (tested on Ubuntu 20.04+)
+
 set -e
 
-echo "Updating package lists..."
-sudo apt-get update
+NEXUS_VERSION="3.59.1-01"
+NEXUS_USER="nexus"
+NEXUS_INSTALL_DIR="/opt/nexus"
+NEXUS_WORK_DIR="/opt/sonatype-work"
+DOWNLOAD_URL="https://download.sonatype.com/nexus/3/nexus-${NEXUS_VERSION}-unix.tar.gz"
 
-echo "Installing OpenJDK 11..."
-sudo apt-get install -y openjdk-11-jdk
+if [[ $EUID -ne 0 ]]; then
+  echo "Please run this script as root or with sudo."
+  exit 1
+fi
 
-echo "Creating nexus user..."
-if id -u nexus >/dev/null 2>&1; then
-    echo "User nexus already exists"
+echo "Updating packages and installing OpenJDK 11..."
+apt-get update
+apt-get install -y openjdk-11-jdk wget
+
+echo "Creating nexus user (if not exists)..."
+if id "$NEXUS_USER" &>/dev/null; then
+  echo "User $NEXUS_USER already exists."
 else
-    sudo useradd -r -m -d /opt/nexus -s /bin/bash nexus
+  useradd -r -m -U -d $NEXUS_INSTALL_DIR -s /bin/bash $NEXUS_USER
+  echo "User $NEXUS_USER created."
 fi
 
-echo "Fetching latest Nexus version..."
-LATEST_VERSION=$(curl -s https://download.sonatype.com/nexus/3/ | \
-grep -oP 'nexus-\K[0-9]+\.[0-9]+\.[0-9]+-[0-9]+' | sort -V | tail -1)
+echo "Downloading Nexus Repository OSS version $NEXUS_VERSION..."
+wget -qO /tmp/nexus.tar.gz $DOWNLOAD_URL
 
-if [[ -z "$LATEST_VERSION" ]]; then
-    echo "Failed to fetch latest Nexus version. Exiting."
-    exit 1
-fi
-
-echo "Latest Nexus version detected: $LATEST_VERSION"
-
-DOWNLOAD_URL="https://download.sonatype.com/nexus/3/nexus-${LATEST_VERSION}-unix.tar.gz"
-echo "Downloading Nexus from $DOWNLOAD_URL..."
-
-wget -q --show-progress $DOWNLOAD_URL -O /tmp/nexus.tar.gz
+echo "Removing old Nexus installation (if any)..."
+rm -rf $NEXUS_INSTALL_DIR $NEXUS_WORK_DIR
 
 echo "Extracting Nexus..."
-sudo tar -xzf /tmp/nexus.tar.gz -C /opt
+tar -xzf /tmp/nexus.tar.gz -C /opt
+mv /opt/nexus-${NEXUS_VERSION} $NEXUS_INSTALL_DIR
 
-echo "Setting up Nexus directory and permissions..."
-sudo mv /opt/nexus-${LATEST_VERSION} /opt/nexus
-sudo chown -R nexus:nexus /opt/nexus
+echo "Setting permissions..."
+chown -R $NEXUS_USER:$NEXUS_USER $NEXUS_INSTALL_DIR $NEXUS_WORK_DIR
 
-echo "Setting permissions for Sonatype Work directory..."
-sudo mkdir -p /opt/sonatype-work
-sudo chown -R nexus:nexus /opt/sonatype-work
+echo 'run_as_user="nexus"' > $NEXUS_INSTALL_DIR/bin/nexus.rc
 
 echo "Creating systemd service file for Nexus..."
 
-sudo tee /etc/systemd/system/nexus.service > /dev/null <<EOF
+cat > /etc/systemd/system/nexus.service << EOF
 [Unit]
-Description=nexus service
+Description=Nexus Repository Manager
 After=network.target
 
 [Service]
 Type=forking
 LimitNOFILE=65536
-User=nexus
-Group=nexus
-ExecStart=/opt/nexus/bin/nexus start
-ExecStop=/opt/nexus/bin/nexus stop
+User=$NEXUS_USER
+Group=$NEXUS_USER
+ExecStart=$NEXUS_INSTALL_DIR/bin/nexus start
+ExecStop=$NEXUS_INSTALL_DIR/bin/nexus stop
 Restart=on-abort
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
-echo "Reloading systemd daemon..."
-sudo systemctl daemon-reload
-
-echo "Enabling Nexus service to start on boot..."
-sudo systemctl enable nexus
+echo "Reloading systemd daemon and enabling Nexus service..."
+systemctl daemon-reload
+systemctl enable nexus
 
 echo "Starting Nexus service..."
-sudo systemctl start nexus
+systemctl start nexus
 
-echo "Checking Nexus service status..."
-sudo systemctl status nexus --no-pager
+echo "Nexus installation completed!"
+echo "Access Nexus UI at http://<your-server-ip>:8081"
