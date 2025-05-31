@@ -1,13 +1,18 @@
 #!/bin/bash
-
-# Exit on any error
 set -e
 
-NEXUS_VERSION=3.66.0-01
 NEXUS_USER=nexus
 NEXUS_HOME=/opt/nexus
 NEXUS_DATA=/opt/sonatype-work
 JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
+
+# Get latest Nexus version dynamically by scraping download page
+echo "Fetching latest Nexus version..."
+LATEST_VERSION=$(curl -s https://download.sonatype.com/nexus/3/ | grep -oP 'nexus-\K3\.\d+\.\d+-\d+' | sort -V | tail -1)
+echo "Latest Nexus version is: $LATEST_VERSION"
+
+# Compose download URL
+DOWNLOAD_URL="https://download.sonatype.com/nexus/3/nexus-${LATEST_VERSION}-unix.tar.gz"
 
 echo "Checking if Nexus user exists..."
 if id -u $NEXUS_USER >/dev/null 2>&1; then
@@ -21,20 +26,21 @@ echo "Installing OpenJDK 11..."
 sudo apt-get update
 sudo apt-get install -y openjdk-11-jdk
 
-echo "Downloading Nexus ${NEXUS_VERSION}..."
+echo "Downloading Nexus ${LATEST_VERSION}..."
 cd /opt
-sudo wget https://download.sonatype.com/nexus/3/nexus-${NEXUS_VERSION}-unix.tar.gz
+sudo wget $DOWNLOAD_URL
 
 echo "Extracting Nexus..."
-sudo tar -xvzf nexus-${NEXUS_VERSION}-unix.tar.gz
-sudo rm nexus-${NEXUS_VERSION}-unix.tar.gz
+sudo tar -xvzf nexus-${LATEST_VERSION}-unix.tar.gz
+sudo rm nexus-${LATEST_VERSION}-unix.tar.gz
 
 echo "Renaming extracted directory to nexus..."
-sudo mv nexus-${NEXUS_VERSION} nexus
+sudo mv nexus-${LATEST_VERSION} nexus
 
 echo "Setting ownership to $NEXUS_USER..."
 sudo chown -R $NEXUS_USER:$NEXUS_USER $NEXUS_HOME
-sudo chown -R $NEXUS_USER:$NEXUS_USER $NEXUS_DATA || sudo mkdir -p $NEXUS_DATA && sudo chown -R $NEXUS_USER:$NEXUS_USER $NEXUS_DATA
+sudo mkdir -p $NEXUS_DATA
+sudo chown -R $NEXUS_USER:$NEXUS_USER $NEXUS_DATA
 
 echo "Configuring Nexus to run as $NEXUS_USER..."
 sudo sed -i "s#run_as_user=\"\"#run_as_user=\"$NEXUS_USER\"#" $NEXUS_HOME/bin/nexus
